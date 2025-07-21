@@ -1,4 +1,17 @@
-#[derive(Debug, PartialEq)]
+use encoding::{Encoding, all::UTF_8};
+use std::{borrow::Cow, io::BufRead};
+use thiserror::Error;
+
+#[derive(Debug, Default)]
+pub struct TokenizerConfig;
+
+impl TokenizerConfig {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Token {
     MoveRight,
     MoveLeft,
@@ -10,15 +23,34 @@ pub enum Token {
     LoopRight,
 }
 
-pub struct BrainfuckTokenizer;
+#[derive(Error, Debug)]
+pub enum TokenizeError {
+    #[error("Failed to read the provided input.")]
+    Io(#[from] std::io::Error),
+    #[error("Cannot decode the input into {0}: {1}")]
+    Decode(String, Cow<'static, str>),
+}
+
+pub struct BrainfuckTokenizer {
+    #[allow(dead_code)] // config is not implemented yet
+    config: TokenizerConfig,
+}
 
 impl BrainfuckTokenizer {
-    pub fn tokenize(input: &str) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        let mut chars = input.chars();
+    pub fn new(config: TokenizerConfig) -> Self {
+        Self { config }
+    }
 
-        while let Some(c) = chars.next() {
-            match c {
+    pub fn tokenize<R: BufRead>(&self, mut input: R) -> Result<Vec<Token>, TokenizeError> {
+        let mut tokens = Vec::new();
+        let mut program_buffer = Vec::new();
+        _ = input.read_to_end(&mut program_buffer)?;
+        let program = UTF_8
+            .decode(program_buffer.as_slice(), encoding::DecoderTrap::Strict)
+            .map_err(|msg| TokenizeError::Decode("UTF-8".to_string(), msg))?;
+
+        for c in program.chars() {
+            match c as char {
                 '>' => tokens.push(Token::MoveRight),
                 '<' => tokens.push(Token::MoveLeft),
                 '+' => tokens.push(Token::Increase),
@@ -27,11 +59,10 @@ impl BrainfuckTokenizer {
                 ',' => tokens.push(Token::Input),
                 '[' => tokens.push(Token::LoopLeft),
                 ']' => tokens.push(Token::LoopRight),
-                _ => {} // Ignore invalid characters
+                _ => {} // Ignore other characters
             }
         }
-
-        tokens
+        Ok(tokens)
     }
 }
 
@@ -42,15 +73,18 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let input = "++>[-<+>].";
-        let tokens = BrainfuckTokenizer::tokenize(input);
+        let tokenizer = BrainfuckTokenizer::new(TokenizerConfig::new());
+        let tokens = tokenizer.tokenize(input.as_bytes());
 
+        assert!(tokens.is_ok());
         assert_eq!(
-            tokens,
+            tokens.unwrap(),
             vec![
                 Token::Increase,
                 Token::Increase,
                 Token::MoveRight,
                 Token::LoopLeft,
+                Token::Decrease,
                 Token::MoveLeft,
                 Token::Increase,
                 Token::MoveRight,
@@ -61,23 +95,42 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_with_invalid_chars() {
-        let input = "++>[-<+>].invalid";
-        let tokens = BrainfuckTokenizer::tokenize(input);
+    fn test_tokenize_with_meaningless_chars() {
+        let input = "++>[-<+>].meaningless";
+        let tokenizer = BrainfuckTokenizer::new(TokenizerConfig::new());
+        let tokens = tokenizer.tokenize(input.as_bytes());
 
+        assert!(tokens.is_ok());
         assert_eq!(
-            tokens,
+            tokens.unwrap(),
             vec![
                 Token::Increase,
                 Token::Increase,
                 Token::MoveRight,
                 Token::LoopLeft,
+                Token::Decrease,
                 Token::MoveLeft,
                 Token::Increase,
                 Token::MoveRight,
                 Token::LoopRight,
                 Token::Output,
             ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_with_wrong_encoding() {
+        use encoding::all::GBK;
+        let input = GBK
+            .encode("++>[-<+>].你好", encoding::EncoderTrap::Strict)
+            .unwrap();
+        let tokenizer = BrainfuckTokenizer::new(TokenizerConfig::new());
+        let tokens = tokenizer.tokenize(input.as_slice());
+
+        assert!(tokens.is_err());
+        assert_eq!(
+            tokens.unwrap_err().to_string(),
+            "Cannot decode the input into UTF-8: invalid sequence".to_string()
         );
     }
 }
