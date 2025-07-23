@@ -25,10 +25,11 @@ pub enum Token {
 
 #[derive(Error, Debug)]
 pub enum TokenizeError {
-    #[error("Failed to read the provided input.")]
+    #[error("failed to read the provided input")]
     Io(#[from] std::io::Error),
-    #[error("Cannot decode the input into {0}: {1}")]
-    Decode(String, Cow<'static, str>),
+    #[error("cannot decode the input into {0}: {1}")]
+    Decode(String, Cow<'static, str>), // The Cow string cannot be annotated as #[source] because
+                                       // it doesn't implement or dereference to std::error::Error
 }
 
 pub struct BrainfuckTokenizer {
